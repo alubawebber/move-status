@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>對方現在方便嗎？</title>
+<style>
+  :root{color-scheme:light dark;}
+  *{box-sizing:border-box;}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"PingFang TC","Helvetica Neue",sans-serif;background:#0f1115;color:#f2f4f8;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px;}
+  .card{width:100%;max-width:420px;background:#181b22;border:1px solid #262b36;border-radius:22px;padding:34px 24px;text-align:center;box-shadow:0 12px 34px rgba(0,0,0,.4);}
+  .name{font-size:15px;color:#8b93a1;margin-bottom:20px;}
+  .emoji{font-size:74px;line-height:1;}
+  .stext{font-size:30px;font-weight:800;margin-top:14px;}
+  .moving .stext{color:#ffb454;} .idle .stext{color:#4ade80;} .off .stext{color:#8b93a1;}
+  .note{font-size:15px;color:#c7cdd8;margin-top:16px;line-height:1.6;min-height:20px;}
+  .ago{font-size:13px;color:#7b8494;margin-top:20px;}
+  .dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:#4ade80;margin-left:6px;vertical-align:middle;animation:blink 2s infinite;}
+  @keyframes blink{0%,100%{opacity:1;}50%{opacity:.25;}}
+  .foot{font-size:11px;color:#5b6270;margin-top:24px;}
+</style>
+</head>
+<body>
+<div class="card" id="card">
+  <div class="name" id="name">載入中…</div>
+  <div class="emoji" id="emoji">⏳</div>
+  <div class="stext" id="stext">載入中</div>
+  <div class="note" id="note"></div>
+  <div class="ago" id="ago"></div>
+  <div class="foot">自動更新 · 每 15 秒刷新一次</div>
+</div>
+<script>
+(function(){
+  var API = "https://sklkgbprxauooiisdfzo.supabase.co/functions/v1";
+  var SLUG = new URLSearchParams(location.search).get("slug") || "webber";
+  var card=document.getElementById("card"), nameEl=document.getElementById("name"), emoji=document.getElementById("emoji"), stext=document.getElementById("stext"), noteEl=document.getElementById("note"), agoEl=document.getElementById("ago");
+  function agoText(ms){
+    var s=Math.floor(ms/1000);
+    if(s<60) return "剛剛更新";
+    var m=Math.floor(s/60); if(m<60) return m+" 分鐘前更新";
+    var h=Math.floor(m/60); if(h<24) return h+" 小時前更新";
+    return Math.floor(h/24)+" 天前更新";
+  }
+  function load(){
+    fetch(API+"/s?slug="+encodeURIComponent(SLUG),{cache:"no-store"}).then(function(r){return r.json();}).then(function(d){
+      if(!d){ nameEl.textContent="找不到這個狀態"; card.className="card off"; emoji.textContent="❓"; stext.textContent="無此用戶"; agoEl.textContent=""; return; }
+      nameEl.textContent=(d.display_name||"對方")+" 的即時狀態";
+      var age=Date.now()-new Date(d.updated_at).getTime();
+      var stale= age>5*60*1000;
+      if(stale){ card.className="card off"; emoji.textContent="⚪️"; stext.textContent="目前未知"; noteEl.textContent="對方可能沒開追蹤（狀態已一段時間沒更新）"; }
+      else if(d.is_moving){ card.className="card moving"; emoji.textContent="🚶"; stext.textContent="移動中"; noteEl.textContent=d.note? d.note : "正在移動，可能不會馬上回訊息〜"; }
+      else { card.className="card idle"; emoji.textContent="🟢"; stext.textContent="有空"; noteEl.textContent=d.note? d.note : "目前沒在移動，可以找我～"; }
+      agoEl.innerHTML=agoText(age)+(stale?"":" <span class=dot></span>");
+    }).catch(function(){ agoEl.textContent="連線中…"; });
+  }
+  load(); setInterval(load,15000);
+  document.addEventListener("visibilitychange",function(){ if(document.visibilityState==="visible") load(); });
+})();
+</script>
+</body>
+</html>
+
