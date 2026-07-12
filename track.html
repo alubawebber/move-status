@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>我的移動狀態 · 追蹤</title>
+<style>
+  :root{color-scheme:light dark;}
+  *{box-sizing:border-box;}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"PingFang TC","Helvetica Neue",sans-serif;background:#0f1115;color:#f2f4f8;min-height:100vh;display:flex;flex-direction:column;align-items:center;padding:24px 18px 40px;}
+  .card{width:100%;max-width:440px;background:#181b22;border:1px solid #262b36;border-radius:20px;padding:26px 22px;box-shadow:0 10px 30px rgba(0,0,0,.35);}
+  h1{font-size:17px;margin:0 0 18px;color:#aeb6c4;font-weight:600;text-align:center;}
+  .status{text-align:center;padding:22px 12px;border-radius:16px;background:#11141a;margin-bottom:18px;transition:.3s;}
+  .emoji{font-size:56px;line-height:1;}
+  .stext{font-size:26px;font-weight:700;margin-top:10px;}
+  .moving .stext{color:#ffb454;} .moving{box-shadow:inset 0 0 0 2px #7a4d14;}
+  .idle .stext{color:#4ade80;} .idle{box-shadow:inset 0 0 0 2px #1f5137;}
+  .off .stext{color:#8b93a1;}
+  .meta{font-size:13px;color:#8b93a1;text-align:center;margin:6px 0 0;min-height:18px;}
+  button{width:100%;border:0;border-radius:14px;padding:16px;font-size:18px;font-weight:700;color:#fff;background:#3b82f6;margin-top:8px;-webkit-tap-highlight-color:transparent;}
+  button.on{background:#ef4444;}
+  label{display:block;font-size:13px;color:#8b93a1;margin:18px 0 6px;}
+  input{width:100%;border:1px solid #2b313d;background:#11141a;color:#f2f4f8;border-radius:12px;padding:12px;font-size:15px;}
+  .hint{font-size:12.5px;color:#7b8494;line-height:1.7;margin-top:18px;background:#11141a;border-radius:12px;padding:12px 14px;}
+  .warn{color:#ffb454;}
+  .err{color:#f87171;font-size:13px;text-align:center;margin-top:10px;min-height:16px;}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>🚶 我的移動狀態 · 追蹤中控台</h1>
+  <div id="box" class="status off">
+    <div class="emoji" id="emoji">⚪️</div>
+    <div class="stext" id="stext">尚未開始</div>
+  </div>
+  <div class="meta" id="speed">按下方按鈕開始追蹤</div>
+  <div class="meta" id="last"></div>
+  <button id="btn">開始追蹤</button>
+  <div class="err" id="err"></div>
+  <label for="note">給朋友看的訊息（可留空）</label>
+  <input id="note" maxlength="60" placeholder="例如：開會中，晚點回你">
+  <div class="hint">
+    <span class="warn">⚠️ 重要：</span>iPhone 為了省電，畫面關掉或切走 App 後就會暫停偵測。出門時把這頁<b>開著、螢幕別鎖</b>放口袋即可；回到定點再按「停止追蹤」。<br><br>
+    第一次會跳出「允許使用定位」，請選<b>允許</b>，偵測才會準。
+  </div>
+</div>
+<script>
+(function(){
+  var API = "https://sklkgbprxauooiisdfzo.supabase.co/functions/v1";
+  var q = new URLSearchParams(location.search);
+  var SLUG = q.get("slug") || "webber";
+  var KEY = q.get("key") || "";
+  var moving=false, running=false, watchId=null, hb=null, lastPoint=null, recent=[], wakeLock=null;
+  var box=document.getElementById("box"), emoji=document.getElementById("emoji"), stext=document.getElementById("stext");
+  var speedEl=document.getElementById("speed"), lastEl=document.getElementById("last"), btn=document.getElementById("btn"), errEl=document.getElementById("err"), noteEl=document.getElementById("note");
+
+  if(!KEY){ errEl.textContent="這個追蹤連結缺少金鑰，請用完整的追蹤連結開啟"; }
+
+  function two(n){return n<10?"0"+n:""+n;}
+  function timeStr(){var d=new Date();return two(d.getHours())+":"+two(d.getMinutes())+":"+two(d.getSeconds());}
+  function haversine(a,b){
+    var R=6371000, toRad=function(x){return x*Math.PI/180;};
+    var dLat=toRad(b.latitude-a.latitude), dLon=toRad(b.longitude-a.longitude);
+    var la1=toRad(a.latitude), la2=toRad(b.latitude);
+    var h=Math.sin(dLat/2)*Math.sin(dLat/2)+Math.cos(la1)*Math.cos(la2)*Math.sin(dLon/2)*Math.sin(dLon/2);
+    return 2*R*Math.asin(Math.sqrt(h));
+  }
+  function render(){
+    if(!running){ box.className="status off"; emoji.textContent="⚪️"; stext.textContent="尚未開始"; return; }
+    if(moving){ box.className="status moving"; emoji.textContent="🚶"; stext.textContent="移動中"; }
+    else { box.className="status idle"; emoji.textContent="🟢"; stext.textContent="有空"; }
+  }
+  function send(isMoving){
+    fetch(API+"/t", {
+      method:"POST", headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({slug:SLUG, key:KEY, is_moving:isMoving, note:(noteEl.value||"")})
+    }).then(function(r){return r.json();}).then(function(res){
+      if(res && res.ok){ lastEl.textContent="已回報「"+(isMoving?"移動中":"有空")+"」· "+timeStr(); errEl.textContent=""; }
+      else { errEl.textContent="回報被拒絕（金鑰可能不正確）"; }
+    }).catch(function(){ errEl.textContent="回報失敗，請檢查網路"; });
+  }
+  function onPos(pos){
+    var now=Date.now();
+    var sp=pos.coords.speed;
+    if(sp==null||isNaN(sp)||sp<0){
+      if(lastPoint){
+        var d=haversine(lastPoint,{latitude:pos.coords.latitude,longitude:pos.coords.longitude});
+        var dt=(now-lastPoint.t)/1000; sp= dt>0? d/dt : 0;
+      } else sp=0;
+    }
+    lastPoint={latitude:pos.coords.latitude,longitude:pos.coords.longitude,t:now};
+    recent.push({s:sp,t:now});
+    recent=recent.filter(function(r){return now-r.t<20000;});
+    var sum=0; for(var i=0;i<recent.length;i++) sum+=recent[i].s;
+    var avg= recent.length? sum/recent.length : 0;
+    speedEl.textContent="目前速度：約 "+(avg*3.6).toFixed(1)+" km/h";
+    var nm=moving;
+    if(!moving && avg>0.9) nm=true;
+    if(moving && avg<0.4) nm=false;
+    if(nm!==moving){ moving=nm; render(); send(moving); }
+  }
+  function onErr(e){ errEl.textContent="定位失敗："+(e && e.message? e.message:"請到 設定 允許定位"); }
+  function requestWake(){ if("wakeLock" in navigator){ navigator.wakeLock.request("screen").then(function(w){wakeLock=w;}).catch(function(){}); } }
+  document.addEventListener("visibilitychange", function(){ if(running && document.visibilityState==="visible") requestWake(); });
+  function start(){
+    if(!KEY){ errEl.textContent="缺少金鑰，無法回報"; return; }
+    if(!("geolocation" in navigator)){ errEl.textContent="此瀏覽器不支援定位"; return; }
+    running=true; btn.textContent="停止追蹤"; btn.className="on"; errEl.textContent=""; recent=[]; lastPoint=null;
+    requestWake();
+    watchId=navigator.geolocation.watchPosition(onPos,onErr,{enableHighAccuracy:true,maximumAge:0,timeout:30000});
+    render(); send(moving);
+    hb=setInterval(function(){ if(running) send(moving); },60000);
+  }
+  function stop(){
+    running=false; btn.textContent="開始追蹤"; btn.className="";
+    if(watchId!=null){ navigator.geolocation.clearWatch(watchId); watchId=null; }
+    if(hb){ clearInterval(hb); hb=null; }
+    if(wakeLock){ try{wakeLock.release();}catch(e){} wakeLock=null; }
+    moving=false; render(); send(false); speedEl.textContent="已停止追蹤";
+  }
+  btn.addEventListener("click", function(){ if(running) stop(); else start(); });
+  render();
+})();
+</script>
+</body>
+</html>
+
